@@ -1,14 +1,13 @@
 package com.innowise.authservice.service;
 
+import com.innowise.authservice.dto.request.AuthRequest;
+import com.innowise.authservice.dto.request.RegistrationRequest;
+import com.innowise.authservice.dto.response.AuthResponse;
 import com.innowise.authservice.entity.Credentials;
 import com.innowise.authservice.entity.Role;
-import com.innowise.authservice.dto.request.AuthRequest;
-import com.innowise.authservice.dto.response.AuthResponse;
-import com.innowise.authservice.dto.request.RegistrationRequest;
 import com.innowise.authservice.exception.AuthException;
 import com.innowise.authservice.exception.UserNotFoundException;
 import com.innowise.authservice.repository.CredentialsRepository;
-import com.innowise.authservice.security.JwtService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

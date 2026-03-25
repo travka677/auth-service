@@ -1,4 +1,4 @@
-package com.innowise.authservice.security;
+package com.innowise.authservice.service;
 
 import com.innowise.authservice.entity.Credentials;
 import io.jsonwebtoken.Jwts;

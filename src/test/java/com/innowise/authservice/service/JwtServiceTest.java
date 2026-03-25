@@ -2,7 +2,6 @@ package com.innowise.authservice.service;
 
 import com.innowise.authservice.entity.Credentials;
 import com.innowise.authservice.entity.Role;
-import com.innowise.authservice.security.JwtService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
