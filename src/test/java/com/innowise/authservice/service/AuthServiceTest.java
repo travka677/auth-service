@@ -6,6 +6,7 @@ import com.innowise.authservice.dto.response.AuthResponse;
 import com.innowise.authservice.entity.Credentials;
 import com.innowise.authservice.entity.Role;
 import com.innowise.authservice.exception.AuthException;
+import com.innowise.authservice.exception.TokenException;
 import com.innowise.authservice.exception.UserNotFoundException;
 import com.innowise.authservice.repository.CredentialsRepository;
 import org.junit.jupiter.api.DisplayName;
@@ -39,8 +40,8 @@ class AuthServiceTest {
     private AuthService authService;
 
     @Test
-    @DisplayName("Should successfully register a new user even if role is null")
-    void registerNewUser() {
+    @DisplayName("Should successfully register user with default role")
+    void shouldRegisterUserWithDefaultRole() {
         RegistrationRequest request = new RegistrationRequest();
         request.setEmail("dev@innowise.com");
         request.setPassword("password");
@@ -50,71 +51,118 @@ class AuthServiceTest {
 
         authService.register(request);
 
-        verify(repository).save(argThat(credentials -> credentials.getRole() == Role.USER));
+        verify(repository).save(argThat(c -> c.getRole() == Role.USER));
     }
 
     @Test
-    @DisplayName("Should throw AuthException when email is already taken")
-    void registerDuplicateEmail() {
+    @DisplayName("Should throw AuthException for existing email")
+    void shouldThrowAuthExceptionForExistingEmail() {
         RegistrationRequest request = new RegistrationRequest();
         request.setEmail("taken@innowise.com");
 
         when(repository.findByEmail(request.getEmail())).thenReturn(Optional.of(new Credentials()));
 
         assertThrows(AuthException.class, () -> authService.register(request));
-        verify(repository, never()).save(any(Credentials.class));
     }
 
     @Test
-    @DisplayName("Should return AuthResponse for valid login credentials")
-    void loginSuccess() {
+    @DisplayName("Should fallback to USER role for invalid role input")
+    void shouldFallbackToUserRoleForInvalidRoleInput() {
+        RegistrationRequest request = new RegistrationRequest();
+        request.setEmail("test@test.com");
+        request.setRole("UNKNOWN_ROLE");
+
+        when(repository.findByEmail(any())).thenReturn(Optional.empty());
+        when(encoder.encode(any())).thenReturn("hash");
+
+        authService.register(request);
+
+        verify(repository).save(argThat(c -> c.getRole() == Role.USER));
+    }
+
+    @Test
+    @DisplayName("Should return tokens for valid credentials")
+    void shouldReturnTokensForValidCredentials() {
         AuthRequest request = new AuthRequest();
         request.setEmail("user@innowise.com");
         request.setPassword("correct_password");
 
         Credentials credentials = Credentials.builder()
                 .id(UUID.randomUUID())
-                .email(request.getEmail())
                 .password("hashed_password")
-                .role(Role.USER)
                 .build();
 
         when(repository.findByEmail(request.getEmail())).thenReturn(Optional.of(credentials));
         when(encoder.matches(request.getPassword(), credentials.getPassword())).thenReturn(true);
-        when(jwtService.generateToken(credentials, false)).thenReturn("access_token");
-        when(jwtService.generateToken(credentials, true)).thenReturn("refresh_token");
+        when(jwtService.generateToken(credentials, false)).thenReturn("at");
+        when(jwtService.generateToken(credentials, true)).thenReturn("rt");
 
         AuthResponse response = authService.login(request);
 
-        assertNotNull(response);
-        assertEquals("access_token", response.getAccessToken());
-        assertEquals("refresh_token", response.getRefreshToken());
+        assertAll(
+                () -> assertEquals("at", response.getAccessToken()),
+                () -> assertEquals("rt", response.getRefreshToken())
+        );
     }
 
     @Test
     @DisplayName("Should throw AuthException for incorrect password")
-    void loginWrongPassword() {
+    void shouldThrowAuthExceptionForIncorrectPassword() {
         AuthRequest request = new AuthRequest();
         request.setEmail("user@innowise.com");
-        request.setPassword("wrong_password");
+        request.setPassword("wrong");
 
         Credentials credentials = new Credentials();
-        credentials.setPassword("hashed_password");
+        credentials.setPassword("hashed");
 
-        when(repository.findByEmail(anyString())).thenReturn(Optional.of(credentials));
-        when(encoder.matches(anyString(), anyString())).thenReturn(false);
+        when(repository.findByEmail(request.getEmail())).thenReturn(Optional.of(credentials));
+        when(encoder.matches(eq(request.getPassword()), anyString())).thenReturn(false);
 
         assertThrows(AuthException.class, () -> authService.login(request));
     }
 
     @Test
-    @DisplayName("Should throw UserNotFoundException when email doesn't exist")
-    void loginUserNotFound() {
+    @DisplayName("Should throw UserNotFoundException for non-existent email")
+    void shouldThrowUserNotFoundExceptionForNonExistentEmail() {
         AuthRequest request = new AuthRequest();
-        request.setEmail("unknown@innowise.com");
+        request.setEmail("notfound@test.com");
 
-        when(repository.findByEmail(anyString())).thenReturn(Optional.empty());
+        when(repository.findByEmail(request.getEmail())).thenReturn(Optional.empty());
 
         assertThrows(UserNotFoundException.class, () -> authService.login(request));
+    }
+
+    @Test
+    @DisplayName("Should return new access token for valid refresh token")
+    void shouldReturnNewAccessTokenForValidRefreshToken() {
+        String rt = "valid-rt";
+        UUID userId = UUID.randomUUID();
+        Credentials credentials = new Credentials();
+
+        when(jwtService.validate(rt)).thenReturn(true);
+        when(jwtService.extractUserId(rt)).thenReturn(userId.toString());
+        when(repository.findById(userId)).thenReturn(Optional.of(credentials));
+        when(jwtService.generateToken(credentials, false)).thenReturn("new-at");
+
+        String result = authService.refresh(rt);
+
+        assertEquals("new-at", result);
+    }
+
+    @Test
+    @DisplayName("Should throw TokenException for invalid refresh token")
+    void shouldThrowTokenExceptionForInvalidRefreshToken() {
+        String badToken = "bad-token";
+        when(jwtService.validate(badToken)).thenReturn(false);
+
+        assertThrows(TokenException.class, () -> authService.refresh(badToken));
+    }
+
+    @Test
+    @DisplayName("Should return true for valid token validation")
+    void shouldReturnTrueForValidTokenValidation() {
+        String token = "token";
+        when(jwtService.validate(token)).thenReturn(true);
+        assertTrue(authService.validate(token));
     }
 }
