@@ -31,6 +31,7 @@
         <!-- Sonar -->
         <sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
         <sonar.coverage.exclusions>**/dto/**</sonar.coverage.exclusions>
+        <sonar.organization>travka677</sonar.organization>
     </properties>
     <dependencies>
         <!--        Data-->
@@ -128,11 +129,6 @@
                         </exclude>
                     </excludes>
                 </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.sonarsource.scanner.maven</groupId>
-                <artifactId>sonar-maven-plugin</artifactId>
-                <version>4.0.0.4121</version>
             </plugin>
             <plugin>
                 <groupId>org.jacoco</groupId>
