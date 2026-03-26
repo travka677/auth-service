@@ -19,3 +19,4 @@ CREATE TABLE credentials
 --changeset dev:001-create-credentials-indexes
 CREATE INDEX idx_credentials_user_id ON credentials (user_id);
 CREATE INDEX idx_credentials_username ON credentials (username);
+ 
