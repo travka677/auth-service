@@ -9,6 +9,7 @@ import com.innowise.authservice.exception.AuthException;
 import com.innowise.authservice.exception.TokenException;
 import com.innowise.authservice.exception.UserNotFoundException;
 import com.innowise.authservice.repository.CredentialsRepository;
+import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -19,30 +20,31 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class AuthService {
 
-    private final CredentialsRepository repository;
-    private final PasswordEncoder encoder;
+    private final CredentialsRepository credentialsRepository;
+    private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
 
     public void register(RegistrationRequest request) {
-        if (repository.findByEmail(request.getEmail()).isPresent()) {
-            throw new AuthException("User with this email already exists");
+        if (credentialsRepository.findByEmail(request.getEmail()).isPresent()) {
+            throw new AuthException("User with email " + request.getEmail() + " already exists");
         }
 
-        Role role = determineRole(request.getRole());
         Credentials credentials = Credentials.builder()
                 .email(request.getEmail())
-                .password(encoder.encode(request.getPassword()))
-                .role(role)
+                .passwordHash(passwordEncoder.encode(request.getPassword()))
+                .role(Role.USER)
                 .build();
 
-        repository.save(credentials);
+        credentialsRepository.save(credentials);
     }
 
     public AuthResponse login(AuthRequest request) {
-        Credentials credentials = repository.findByEmail(request.getEmail())
-                .orElseThrow(() -> new UserNotFoundException("User not found with email: " + request.getEmail()));
+        Credentials credentials = credentialsRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new UserNotFoundException(
+                        "User not found with email: " + request.getEmail())
+                );
 
-        if (!encoder.matches(request.getPassword(), credentials.getPassword())) {
+        if (!passwordEncoder.matches(request.getPassword(), credentials.getPasswordHash())) {
             throw new AuthException("Invalid password");
         }
 
@@ -56,7 +58,7 @@ public class AuthService {
             throw new TokenException("Invalid refresh token");
         }
         String userId = jwtService.extractUserId(refreshToken);
-        Credentials credentials = repository.findById(UUID.fromString(userId))
+        Credentials credentials = credentialsRepository.findByUserId(UUID.fromString(userId))
                 .orElseThrow(() -> new UserNotFoundException("User not found"));
 
         return jwtService.generateToken(credentials, false);
@@ -66,15 +68,11 @@ public class AuthService {
         return jwtService.validate(token);
     }
 
-    private Role determineRole(String roleName) {
-        if (roleName == null || roleName.isBlank()) {
-            return Role.USER;
-        }
-
-        try {
-            return Role.valueOf(roleName.toUpperCase());
-        } catch (IllegalArgumentException e) {
-            return Role.USER;
-        }
+    @Transactional
+    public void assignAdminRole(UUID userId) {
+        Credentials credentials = credentialsRepository.findByUserId(userId)
+                .orElseThrow(() -> new UserNotFoundException("User not found"));
+        credentials.setRole(Role.ADMIN);
+        credentialsRepository.save(credentials);
     }
 }

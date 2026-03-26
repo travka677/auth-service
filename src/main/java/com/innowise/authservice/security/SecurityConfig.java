@@ -1,5 +1,6 @@
 package com.innowise.authservice.security;
 
+import com.innowise.authservice.entity.Role;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -25,6 +26,7 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(a -> a
+                        .requestMatchers("/auth/admin/**").hasRole(Role.ADMIN.toString())
                         .requestMatchers("/auth/**").permitAll()
                         .anyRequest().authenticated()
                 )
