@@ -58,7 +58,6 @@ jobs:
       - name: Run Tests and SonarQube Analysis
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ./mvnw verify sonar:sonar \
             -Dsonar.projectKey=travka677_auth-service \
