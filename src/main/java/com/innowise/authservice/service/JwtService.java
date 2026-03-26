@@ -3,9 +3,13 @@ package com.innowise.authservice.service;
 import com.innowise.authservice.entity.Credentials;
 import com.innowise.authservice.exception.TokenException;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.MalformedJwtException;
+import io.jsonwebtoken.UnsupportedJwtException;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
+import io.jsonwebtoken.security.SignatureException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -53,8 +57,16 @@ public class JwtService {
                     .parseSignedClaims(token)
                     .getPayload()
                     .getSubject();
-        } catch (Exception e) {
-            throw new TokenException("Invalid token");
+        } catch (ExpiredJwtException e) {
+            throw new TokenException("Token has expired");
+        } catch (UnsupportedJwtException e) {
+            throw new TokenException("Token is unsupported");
+        } catch (MalformedJwtException e) {
+            throw new TokenException("Token is malformed");
+        } catch (SignatureException e) {
+            throw new TokenException("Token signature is invalid");
+        } catch (IllegalArgumentException e) {
+            throw new TokenException("Token is empty or null");
         }
     }
 
@@ -66,7 +78,8 @@ public class JwtService {
                     .parseSignedClaims(token)
                     .getPayload();
             return TYPE_ACCESS.equals(claims.get(CLAIM_TYPE));
-        } catch (Exception e) {
+        } catch (ExpiredJwtException | UnsupportedJwtException | MalformedJwtException |
+                 SignatureException | IllegalArgumentException e) {
             return false;
         }
     }
@@ -79,7 +92,8 @@ public class JwtService {
                     .parseSignedClaims(token)
                     .getPayload();
             return TYPE_REFRESH.equals(claims.get(CLAIM_TYPE));
-        } catch (Exception e) {
+        } catch (ExpiredJwtException | UnsupportedJwtException | MalformedJwtException |
+                 SignatureException | IllegalArgumentException e) {
             return false;
         }
     }

@@ -100,9 +100,40 @@ class JwtServiceTest {
     }
 
     @Test
-    @DisplayName("Extract user id throws TokenException for invalid token")
-    void extractUserIdThrowsTokenExceptionForInvalidToken() {
-        assertThatThrownBy(() -> jwtService.extractUserId("invalidToken"))
-                .isInstanceOf(TokenException.class);
+    @DisplayName("Extract user id throws TokenException when token has expired")
+    void extractUserIdThrowsTokenExceptionWhenTokenHasExpired() {
+        ReflectionTestUtils.setField(jwtService, "accessExp", -1000L);
+        String expiredToken = jwtService.generateToken(credentials, false);
+
+        assertThatThrownBy(() -> jwtService.extractUserId(expiredToken))
+                .isInstanceOf(TokenException.class)
+                .hasMessage("Token has expired");
+    }
+
+    @Test
+    @DisplayName("Extract user id throws TokenException when token is malformed")
+    void extractUserIdThrowsTokenExceptionWhenTokenIsMalformed() {
+        assertThatThrownBy(() -> jwtService.extractUserId("malformed.token.here"))
+                .isInstanceOf(TokenException.class)
+                .hasMessage("Token is malformed");
+    }
+
+    @Test
+    @DisplayName("Extract user id throws TokenException when token is empty")
+    void extractUserIdThrowsTokenExceptionWhenTokenIsEmpty() {
+        assertThatThrownBy(() -> jwtService.extractUserId(""))
+                .isInstanceOf(TokenException.class)
+                .hasMessage("Token is empty or null");
+    }
+
+    @Test
+    @DisplayName("Extract user id throws TokenException when token signature is invalid")
+    void extractUserIdThrowsTokenExceptionWhenTokenSignatureIsInvalid() {
+        String validToken = jwtService.generateToken(credentials, false);
+        String tamperedToken = validToken.substring(0, validToken.lastIndexOf('.') + 1) + "invalidsignature";
+
+        assertThatThrownBy(() -> jwtService.extractUserId(tamperedToken))
+                .isInstanceOf(TokenException.class)
+                .hasMessage("Token signature is invalid");
     }
 }
