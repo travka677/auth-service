@@ -1,6 +1,8 @@
 package com.innowise.authservice.service;
 
 import com.innowise.authservice.entity.Credentials;
+import com.innowise.authservice.exception.TokenException;
+import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
@@ -14,6 +16,11 @@ import java.util.Map;
 @Service
 public class JwtService {
 
+    private static final String TYPE_ACCESS = "access";
+    private static final String TYPE_REFRESH = "refresh";
+    private static final String CLAIM_TYPE = "type";
+    private static final String CLAIM_ROLE = "role";
+
     @Value("${jwt.secret}")
     private String secret;
 
@@ -24,12 +31,14 @@ public class JwtService {
     private long refreshExp;
 
     public String generateToken(Credentials credentials, boolean isRefresh) {
-        Map<String, Object> claims = isRefresh ? Map.of() : Map.of("role", credentials.getRole().name());
+        Map<String, Object> claims = isRefresh
+                ? Map.of(CLAIM_TYPE, TYPE_REFRESH)
+                : Map.of(CLAIM_TYPE, TYPE_ACCESS, CLAIM_ROLE, credentials.getRole().name());
         long expiration = isRefresh ? refreshExp : accessExp;
 
         return Jwts.builder()
                 .claims(claims)
-                .subject(credentials.getId().toString())
+                .subject(credentials.getUserId().toString())
                 .issuedAt(new Date(System.currentTimeMillis()))
                 .expiration(new Date(System.currentTimeMillis() + expiration))
                 .signWith(getSigningKey())
@@ -37,18 +46,39 @@ public class JwtService {
     }
 
     public String extractUserId(String token) {
-        return Jwts.parser()
-                .verifyWith(getSigningKey())
-                .build()
-                .parseSignedClaims(token)
-                .getPayload()
-                .getSubject();
+        try {
+            return Jwts.parser()
+                    .verifyWith(getSigningKey())
+                    .build()
+                    .parseSignedClaims(token)
+                    .getPayload()
+                    .getSubject();
+        } catch (Exception e) {
+            throw new TokenException("Invalid token");
+        }
     }
 
     public boolean validate(String token) {
         try {
-            Jwts.parser().verifyWith(getSigningKey()).build().parseSignedClaims(token);
-            return true;
+            Claims claims = Jwts.parser()
+                    .verifyWith(getSigningKey())
+                    .build()
+                    .parseSignedClaims(token)
+                    .getPayload();
+            return TYPE_ACCESS.equals(claims.get(CLAIM_TYPE));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public boolean validateRefresh(String token) {
+        try {
+            Claims claims = Jwts.parser()
+                    .verifyWith(getSigningKey())
+                    .build()
+                    .parseSignedClaims(token)
+                    .getPayload();
+            return TYPE_REFRESH.equals(claims.get(CLAIM_TYPE));
         } catch (Exception e) {
             return false;
         }

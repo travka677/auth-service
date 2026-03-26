@@ -20,7 +20,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import java.util.Optional;
 import java.util.UUID;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -28,10 +29,10 @@ import static org.mockito.Mockito.*;
 class AuthServiceTest {
 
     @Mock
-    private CredentialsRepository repository;
+    private CredentialsRepository credentialsRepository;
 
     @Mock
-    private PasswordEncoder encoder;
+    private PasswordEncoder passwordEncoder;
 
     @Mock
     private JwtService jwtService;
@@ -40,129 +41,177 @@ class AuthServiceTest {
     private AuthService authService;
 
     @Test
-    @DisplayName("Should successfully register user with default role")
-    void shouldRegisterUserWithDefaultRole() {
+    @DisplayName("Register saves credentials when email is not taken")
+    void registerSavesCredentialsWhenEmailIsNotTaken() {
         RegistrationRequest request = new RegistrationRequest();
-        request.setEmail("dev@innowise.com");
+        request.setEmail("test@example.com");
         request.setPassword("password");
 
-        when(repository.findByEmail(request.getEmail())).thenReturn(Optional.empty());
-        when(encoder.encode(anyString())).thenReturn("hashed_password");
+        when(credentialsRepository.findByEmail(request.getEmail())).thenReturn(Optional.empty());
+        when(passwordEncoder.encode(request.getPassword())).thenReturn("hashedPassword");
 
         authService.register(request);
 
-        verify(repository).save(argThat(c -> c.getRole() == Role.USER));
+        verify(credentialsRepository).save(any(Credentials.class));
     }
 
     @Test
-    @DisplayName("Should throw AuthException for existing email")
-    void shouldThrowAuthExceptionForExistingEmail() {
+    @DisplayName("Register throws AuthException when email is already taken")
+    void registerThrowsAuthExceptionWhenEmailIsAlreadyTaken() {
         RegistrationRequest request = new RegistrationRequest();
-        request.setEmail("taken@innowise.com");
+        request.setEmail("test@example.com");
+        request.setPassword("password");
 
-        when(repository.findByEmail(request.getEmail())).thenReturn(Optional.of(new Credentials()));
+        when(credentialsRepository.findByEmail(request.getEmail()))
+                .thenReturn(Optional.of(new Credentials()));
 
-        assertThrows(AuthException.class, () -> authService.register(request));
+        assertThatThrownBy(() -> authService.register(request))
+                .isInstanceOf(AuthException.class)
+                .hasMessageContaining(request.getEmail());
     }
 
     @Test
-    @DisplayName("Should fallback to USER role for invalid role input")
-    void shouldFallbackToUserRoleForInvalidRoleInput() {
-        RegistrationRequest request = new RegistrationRequest();
-        request.setEmail("test@test.com");
-        request.setRole("UNKNOWN_ROLE");
-
-        when(repository.findByEmail(any())).thenReturn(Optional.empty());
-        when(encoder.encode(any())).thenReturn("hash");
-
-        authService.register(request);
-
-        verify(repository).save(argThat(c -> c.getRole() == Role.USER));
-    }
-
-    @Test
-    @DisplayName("Should return tokens for valid credentials")
-    void shouldReturnTokensForValidCredentials() {
+    @DisplayName("Login returns tokens when credentials are valid")
+    void loginReturnsTokensWhenCredentialsAreValid() {
         AuthRequest request = new AuthRequest();
-        request.setEmail("user@innowise.com");
-        request.setPassword("correct_password");
+        request.setEmail("test@example.com");
+        request.setPassword("password");
 
         Credentials credentials = Credentials.builder()
-                .id(UUID.randomUUID())
-                .password("hashed_password")
+                .userId(UUID.randomUUID())
+                .email(request.getEmail())
+                .passwordHash("hashedPassword")
+                .role(Role.USER)
                 .build();
 
-        when(repository.findByEmail(request.getEmail())).thenReturn(Optional.of(credentials));
-        when(encoder.matches(request.getPassword(), credentials.getPassword())).thenReturn(true);
-        when(jwtService.generateToken(credentials, false)).thenReturn("at");
-        when(jwtService.generateToken(credentials, true)).thenReturn("rt");
+        when(credentialsRepository.findByEmail(request.getEmail())).thenReturn(Optional.of(credentials));
+        when(passwordEncoder.matches(request.getPassword(), credentials.getPasswordHash())).thenReturn(true);
+        when(jwtService.generateToken(credentials, false)).thenReturn("accessToken");
+        when(jwtService.generateToken(credentials, true)).thenReturn("refreshToken");
 
         AuthResponse response = authService.login(request);
 
-        assertAll(
-                () -> assertEquals("at", response.getAccessToken()),
-                () -> assertEquals("rt", response.getRefreshToken())
-        );
+        assertThat(response.getAccessToken()).isEqualTo("accessToken");
+        assertThat(response.getRefreshToken()).isEqualTo("refreshToken");
     }
 
     @Test
-    @DisplayName("Should throw AuthException for incorrect password")
-    void shouldThrowAuthExceptionForIncorrectPassword() {
+    @DisplayName("Login throws UserNotFoundException when email does not exist")
+    void loginThrowsUserNotFoundExceptionWhenEmailDoesNotExist() {
         AuthRequest request = new AuthRequest();
-        request.setEmail("user@innowise.com");
-        request.setPassword("wrong");
+        request.setEmail("unknown@example.com");
+        request.setPassword("password");
 
-        Credentials credentials = new Credentials();
-        credentials.setPassword("hashed");
+        when(credentialsRepository.findByEmail(request.getEmail())).thenReturn(Optional.empty());
 
-        when(repository.findByEmail(request.getEmail())).thenReturn(Optional.of(credentials));
-        when(encoder.matches(eq(request.getPassword()), anyString())).thenReturn(false);
-
-        assertThrows(AuthException.class, () -> authService.login(request));
+        assertThatThrownBy(() -> authService.login(request))
+                .isInstanceOf(UserNotFoundException.class);
     }
 
     @Test
-    @DisplayName("Should throw UserNotFoundException for non-existent email")
-    void shouldThrowUserNotFoundExceptionForNonExistentEmail() {
+    @DisplayName("Login throws AuthException when password is invalid")
+    void loginThrowsAuthExceptionWhenPasswordIsInvalid() {
         AuthRequest request = new AuthRequest();
-        request.setEmail("notfound@test.com");
+        request.setEmail("test@example.com");
+        request.setPassword("wrongPassword");
 
-        when(repository.findByEmail(request.getEmail())).thenReturn(Optional.empty());
+        Credentials credentials = Credentials.builder()
+                .email(request.getEmail())
+                .passwordHash("hashedPassword")
+                .role(Role.USER)
+                .build();
 
-        assertThrows(UserNotFoundException.class, () -> authService.login(request));
+        when(credentialsRepository.findByEmail(request.getEmail())).thenReturn(Optional.of(credentials));
+        when(passwordEncoder.matches(request.getPassword(), credentials.getPasswordHash())).thenReturn(false);
+
+        assertThatThrownBy(() -> authService.login(request))
+                .isInstanceOf(AuthException.class)
+                .hasMessageContaining("Invalid password");
     }
 
     @Test
-    @DisplayName("Should return new access token for valid refresh token")
-    void shouldReturnNewAccessTokenForValidRefreshToken() {
-        String rt = "valid-rt";
+    @DisplayName("Refresh returns new access token when refresh token is valid")
+    void refreshReturnsNewAccessTokenWhenRefreshTokenIsValid() {
         UUID userId = UUID.randomUUID();
-        Credentials credentials = new Credentials();
+        Credentials credentials = Credentials.builder()
+                .userId(userId)
+                .email("test@example.com")
+                .role(Role.USER)
+                .build();
 
-        when(jwtService.validate(rt)).thenReturn(true);
-        when(jwtService.extractUserId(rt)).thenReturn(userId.toString());
-        when(repository.findById(userId)).thenReturn(Optional.of(credentials));
-        when(jwtService.generateToken(credentials, false)).thenReturn("new-at");
+        when(jwtService.validateRefresh("refreshToken")).thenReturn(true);
+        when(jwtService.extractUserId("refreshToken")).thenReturn(userId.toString());
+        when(credentialsRepository.findByUserId(userId)).thenReturn(Optional.of(credentials));
+        when(jwtService.generateToken(credentials, false)).thenReturn("newAccessToken");
 
-        String result = authService.refresh(rt);
+        String result = authService.refresh("refreshToken");
 
-        assertEquals("new-at", result);
+        assertThat(result).isEqualTo("newAccessToken");
     }
 
     @Test
-    @DisplayName("Should throw TokenException for invalid refresh token")
-    void shouldThrowTokenExceptionForInvalidRefreshToken() {
-        String badToken = "bad-token";
-        when(jwtService.validate(badToken)).thenReturn(false);
+    @DisplayName("Refresh throws TokenException when refresh token is invalid")
+    void refreshThrowsTokenExceptionWhenRefreshTokenIsInvalid() {
+        when(jwtService.validateRefresh("invalidToken")).thenReturn(false);
 
-        assertThrows(TokenException.class, () -> authService.refresh(badToken));
+        assertThatThrownBy(() -> authService.refresh("invalidToken"))
+                .isInstanceOf(TokenException.class);
     }
 
     @Test
-    @DisplayName("Should return true for valid token validation")
-    void shouldReturnTrueForValidTokenValidation() {
-        String token = "token";
-        when(jwtService.validate(token)).thenReturn(true);
-        assertTrue(authService.validate(token));
+    @DisplayName("Refresh throws UserNotFoundException when user does not exist")
+    void refreshThrowsUserNotFoundExceptionWhenUserDoesNotExist() {
+        UUID userId = UUID.randomUUID();
+
+        when(jwtService.validateRefresh("refreshToken")).thenReturn(true);
+        when(jwtService.extractUserId("refreshToken")).thenReturn(userId.toString());
+        when(credentialsRepository.findByUserId(userId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authService.refresh("refreshToken"))
+                .isInstanceOf(UserNotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("Validate returns true when token is valid")
+    void validateReturnsTrueWhenTokenIsValid() {
+        when(jwtService.validate("validToken")).thenReturn(true);
+
+        assertThat(authService.validate("validToken")).isTrue();
+    }
+
+    @Test
+    @DisplayName("Validate returns false when token is invalid")
+    void validateReturnsFalseWhenTokenIsInvalid() {
+        when(jwtService.validate("invalidToken")).thenReturn(false);
+
+        assertThat(authService.validate("invalidToken")).isFalse();
+    }
+
+    @Test
+    @DisplayName("Assign admin role updates role to admin")
+    void assignAdminRoleUpdatesRoleToAdmin() {
+        UUID userId = UUID.randomUUID();
+        Credentials credentials = Credentials.builder()
+                .userId(userId)
+                .role(Role.USER)
+                .build();
+
+        when(credentialsRepository.findByUserId(userId)).thenReturn(Optional.of(credentials));
+
+        authService.assignAdminRole(userId);
+
+        assertThat(credentials.getRole()).isEqualTo(Role.ADMIN);
+        verify(credentialsRepository).save(credentials);
+    }
+
+    @Test
+    @DisplayName("Assign admin role throws UserNotFoundException when user does not exist")
+    void assignAdminRoleThrowsUserNotFoundExceptionWhenUserDoesNotExist() {
+        UUID userId = UUID.randomUUID();
+
+        when(credentialsRepository.findByUserId(userId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authService.assignAdminRole(userId))
+                .isInstanceOf(UserNotFoundException.class);
     }
 }

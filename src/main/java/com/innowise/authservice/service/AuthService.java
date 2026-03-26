@@ -29,7 +29,10 @@ public class AuthService {
             throw new AuthException("User with email " + request.getEmail() + " already exists");
         }
 
+        // TODO: call user-service to create user and get userId
+        UUID userId = UUID.randomUUID();
         Credentials credentials = Credentials.builder()
+                .userId(userId)
                 .email(request.getEmail())
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
                 .role(Role.USER)
@@ -54,7 +57,7 @@ public class AuthService {
     }
 
     public String refresh(String refreshToken) {
-        if (!jwtService.validate(refreshToken)) {
+        if (!jwtService.validateRefresh(refreshToken)) {
             throw new TokenException("Invalid refresh token");
         }
         String userId = jwtService.extractUserId(refreshToken);

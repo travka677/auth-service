@@ -3,6 +3,7 @@ package com.innowise.authservice.controller;
 import com.innowise.authservice.dto.request.AuthRequest;
 import com.innowise.authservice.dto.response.AuthResponse;
 import com.innowise.authservice.dto.request.RegistrationRequest;
+import com.innowise.authservice.dto.response.RefreshResponse;
 import com.innowise.authservice.service.AuthService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -46,11 +47,11 @@ public class AuthController {
      * Generates a new access token using a valid refresh token
      *
      * @param token refresh token
-     * @return new access token
+     * @return new access token wrapped in RefreshResponse
      */
     @PostMapping("/refresh")
-    public ResponseEntity<String> refresh(@RequestParam String token) {
-        return ResponseEntity.ok(authService.refresh(token));
+    public ResponseEntity<RefreshResponse> refresh(@RequestParam String token) {
+        return ResponseEntity.ok(new RefreshResponse(authService.refresh(token)));
     }
 
     /**
