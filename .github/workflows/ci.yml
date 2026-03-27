@@ -5,7 +5,8 @@ on:
     branches:
       - '**'
   pull_request:
-    types: [opened, synchronize, reopened]
+    branches:
+      - main
 
 jobs:
   build:
@@ -51,13 +52,6 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      - name: Cache SonarQube packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.sonar/cache
-          key: ${{ runner.os }}-sonar
-          restore-keys: ${{ runner.os }}-sonar
-
       - name: Make mvnw executable
         run: chmod +x mvnw
 
@@ -66,8 +60,16 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ./mvnw -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
-            -Dsonar.projectKey=travka677_auth-service
+          ./mvnw verify sonar:sonar \
+            -Dsonar.projectKey=travka677_auth-service \
+            -Dsonar.projectName=auth-service \
+            -Dsonar.organization=travka677 \
+            -Dsonar.host.url=https://sonarcloud.io \
+            -Dsonar.token=${{ secrets.SONAR_TOKEN }} \
+            -Dsonar.pullrequest.key=${{ github.event.pull_request.number }} \
+            -Dsonar.pullrequest.branch=${{ github.head_ref }} \
+            -Dsonar.pullrequest.base=${{ github.base_ref }} \
+            -Dsonar.coverage.exclusions=**/JpaConfig.java,**/SecurityConfig.java
 
       - name: Upload test results
         if: always()
