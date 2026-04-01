@@ -1,5 +1,6 @@
 package com.innowise.authservice.service;
 
+import com.innowise.authservice.dto.response.ValidateResponse;
 import com.innowise.authservice.entity.Credentials;
 import com.innowise.authservice.entity.Role;
 import com.innowise.authservice.exception.TokenException;
@@ -16,7 +17,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class JwtServiceTest {
 
     private JwtService jwtService;
-
     private Credentials credentials;
 
     @BeforeEach
@@ -52,28 +52,6 @@ class JwtServiceTest {
     }
 
     @Test
-    @DisplayName("Validate returns true for valid access token")
-    void validateReturnsTrueForValidAccessToken() {
-        String token = jwtService.generateToken(credentials, false);
-
-        assertThat(jwtService.validate(token)).isTrue();
-    }
-
-    @Test
-    @DisplayName("Validate returns false for refresh token")
-    void validateReturnsFalseForRefreshToken() {
-        String token = jwtService.generateToken(credentials, true);
-
-        assertThat(jwtService.validate(token)).isFalse();
-    }
-
-    @Test
-    @DisplayName("Validate returns false for invalid token")
-    void validateReturnsFalseForInvalidToken() {
-        assertThat(jwtService.validate("invalidToken")).isFalse();
-    }
-
-    @Test
     @DisplayName("Validate refresh returns true for valid refresh token")
     void validateRefreshReturnsTrueForValidRefreshToken() {
         String token = jwtService.generateToken(credentials, true);
@@ -94,9 +72,7 @@ class JwtServiceTest {
     void extractUserIdReturnsCorrectUserIdFromToken() {
         String token = jwtService.generateToken(credentials, false);
 
-        String extractedUserId = jwtService.extractUserId(token);
-
-        assertThat(extractedUserId).isEqualTo(credentials.getUserId().toString());
+        assertThat(jwtService.extractUserId(token)).isEqualTo(credentials.getUserId().toString());
     }
 
     @Test
@@ -135,5 +111,52 @@ class JwtServiceTest {
         assertThatThrownBy(() -> jwtService.extractUserId(tamperedToken))
                 .isInstanceOf(TokenException.class)
                 .hasMessage("Token signature is invalid");
+    }
+
+    @Test
+    @DisplayName("ValidateAndExtract returns valid response with userId and role for valid access token")
+    void validateAndExtractReturnsValidResponseForValidAccessToken() {
+        String token = jwtService.generateToken(credentials, false);
+
+        ValidateResponse response = jwtService.validateAndExtract(token);
+
+        assertThat(response.isValid()).isTrue();
+        assertThat(response.getUserId()).isEqualTo(credentials.getUserId().toString());
+        assertThat(response.getRole()).isEqualTo(Role.USER);
+    }
+
+    @Test
+    @DisplayName("ValidateAndExtract returns valid=false for refresh token")
+    void validateAndExtractReturnsInvalidResponseForRefreshToken() {
+        String token = jwtService.generateToken(credentials, true);
+
+        ValidateResponse response = jwtService.validateAndExtract(token);
+
+        assertThat(response.isValid()).isFalse();
+        assertThat(response.getUserId()).isNull();
+        assertThat(response.getRole()).isNull();
+    }
+
+    @Test
+    @DisplayName("ValidateAndExtract returns valid=false for invalid token")
+    void validateAndExtractReturnsInvalidResponseForInvalidToken() {
+        ValidateResponse response = jwtService.validateAndExtract("invalidToken");
+
+        assertThat(response.isValid()).isFalse();
+        assertThat(response.getUserId()).isNull();
+        assertThat(response.getRole()).isNull();
+    }
+
+    @Test
+    @DisplayName("ValidateAndExtract returns valid=false for expired token")
+    void validateAndExtractReturnsInvalidResponseForExpiredToken() {
+        ReflectionTestUtils.setField(jwtService, "accessExp", -1000L);
+        String expiredToken = jwtService.generateToken(credentials, false);
+
+        ValidateResponse response = jwtService.validateAndExtract(expiredToken);
+
+        assertThat(response.isValid()).isFalse();
+        assertThat(response.getUserId()).isNull();
+        assertThat(response.getRole()).isNull();
     }
 }

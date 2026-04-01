@@ -4,10 +4,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.innowise.authservice.dto.request.AuthRequest;
 import com.innowise.authservice.dto.request.RegistrationRequest;
 import com.innowise.authservice.dto.response.AuthResponse;
+import com.innowise.authservice.dto.response.ValidateResponse;
+import com.innowise.authservice.entity.Role;
 import com.innowise.authservice.exception.AuthException;
 import com.innowise.authservice.exception.TokenException;
 import com.innowise.authservice.exception.UserNotFoundException;
+import com.innowise.authservice.filter.JwtAuthenticationFilter;
 import com.innowise.authservice.service.AuthService;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,6 +42,20 @@ class AuthControllerTest {
 
     @MockitoBean
     private AuthService authService;
+
+    @MockitoBean
+    private JwtAuthenticationFilter jwtAuthenticationFilter;
+
+    @BeforeEach
+    void setUp() throws Exception {
+        doAnswer(invocation -> {
+            HttpServletRequest request = invocation.getArgument(0);
+            HttpServletResponse response = invocation.getArgument(1);
+            FilterChain chain = invocation.getArgument(2);
+            chain.doFilter(request, response);
+            return null;
+        }).when(jwtAuthenticationFilter).doFilter(any(), any(), any());
+    }
 
     @Test
     @DisplayName("Register returns 201 when request is valid")
@@ -184,25 +205,56 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("Validate returns true when token is valid")
-    void validateReturnsTrueWhenTokenIsValid() throws Exception {
-        when(authService.validate("validToken")).thenReturn(true);
+    @DisplayName("Validate returns structured response when token is valid")
+    void validateReturnsStructuredResponseWhenTokenIsValid() throws Exception {
+        UUID userId = UUID.randomUUID();
+        ValidateResponse response = new ValidateResponse(true, userId.toString(), Role.USER);
+
+        when(authService.validate("validToken")).thenReturn(response);
 
         mockMvc.perform(get("/auth/validate")
                         .param("token", "validToken"))
                 .andExpect(status().isOk())
-                .andExpect(content().string("true"));
+                .andExpect(jsonPath("$.valid").value(true))
+                .andExpect(jsonPath("$.userId").value(userId.toString()))
+                .andExpect(jsonPath("$.role").value("USER"));
     }
 
     @Test
-    @DisplayName("Validate returns false when token is invalid")
-    void validateReturnsFalseWhenTokenIsInvalid() throws Exception {
-        when(authService.validate("invalidToken")).thenReturn(false);
+    @DisplayName("Validate returns valid=false when token is invalid")
+    void validateReturnsInvalidResponseWhenTokenIsInvalid() throws Exception {
+        ValidateResponse response = new ValidateResponse(false, null, null);
+
+        when(authService.validate("invalidToken")).thenReturn(response);
 
         mockMvc.perform(get("/auth/validate")
                         .param("token", "invalidToken"))
                 .andExpect(status().isOk())
-                .andExpect(content().string("false"));
+                .andExpect(jsonPath("$.valid").value(false))
+                .andExpect(jsonPath("$.userId").isEmpty())
+                .andExpect(jsonPath("$.role").isEmpty());
+    }
+
+    @Test
+    @DisplayName("Logout returns 204 when refresh token is valid")
+    void logoutReturns204WhenRefreshTokenIsValid() throws Exception {
+        doNothing().when(authService).logout("validRefreshToken");
+
+        mockMvc.perform(post("/auth/logout")
+                        .param("token", "validRefreshToken"))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    @DisplayName("Logout returns 401 when refresh token is not found")
+    void logoutReturns401WhenRefreshTokenIsNotFound() throws Exception {
+        doThrow(new TokenException("Refresh token not found"))
+                .when(authService).logout("unknownToken");
+
+        mockMvc.perform(post("/auth/logout")
+                        .param("token", "unknownToken"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Refresh token not found"));
     }
 
     @Test

@@ -4,6 +4,7 @@ import com.innowise.authservice.dto.request.AuthRequest;
 import com.innowise.authservice.dto.response.AuthResponse;
 import com.innowise.authservice.dto.request.RegistrationRequest;
 import com.innowise.authservice.dto.response.RefreshResponse;
+import com.innowise.authservice.dto.response.ValidateResponse;
 import com.innowise.authservice.service.AuthService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -61,7 +62,7 @@ public class AuthController {
      * @return true if token is valid, false otherwise
      */
     @GetMapping("/validate")
-    public ResponseEntity<Boolean> validate(@RequestParam String token) {
+    public ResponseEntity<ValidateResponse> validate(@RequestParam String token) {
         return ResponseEntity.ok(authService.validate(token));
     }
 
@@ -75,5 +76,17 @@ public class AuthController {
     public ResponseEntity<Void> assignAdmin(@PathVariable UUID userId) {
         authService.assignAdminRole(userId);
         return ResponseEntity.ok().build();
+    }
+
+    /**
+     * Завершает сессию пользователя, отзывая refresh-токен
+     *
+     * @param token refresh-токен
+     * @return HTTP 204 (No Content)
+     */
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(@RequestParam String token) {
+        authService.logout(token);
+        return ResponseEntity.noContent().build();
     }
 }

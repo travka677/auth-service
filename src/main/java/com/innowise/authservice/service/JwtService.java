@@ -1,6 +1,8 @@
 package com.innowise.authservice.service;
 
+import com.innowise.authservice.dto.response.ValidateResponse;
 import com.innowise.authservice.entity.Credentials;
+import com.innowise.authservice.entity.Role;
 import com.innowise.authservice.exception.TokenException;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
@@ -70,17 +72,25 @@ public class JwtService {
         }
     }
 
-    public boolean validate(String token) {
+    public ValidateResponse validateAndExtract(String token) {
         try {
             Claims claims = Jwts.parser()
                     .verifyWith(getSigningKey())
                     .build()
                     .parseSignedClaims(token)
                     .getPayload();
-            return TYPE_ACCESS.equals(claims.get(CLAIM_TYPE));
+
+            if (!TYPE_ACCESS.equals(claims.get(CLAIM_TYPE))) {
+                return new ValidateResponse(false, null, null);
+            }
+
+            String userId = claims.getSubject();
+            Role role = Role.valueOf(claims.get(CLAIM_ROLE, String.class));
+            return new ValidateResponse(true, userId, role);
+
         } catch (ExpiredJwtException | UnsupportedJwtException | MalformedJwtException |
                  SignatureException | IllegalArgumentException e) {
-            return false;
+            return new ValidateResponse(false, null, null);
         }
     }
 

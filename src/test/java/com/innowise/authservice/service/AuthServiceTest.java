@@ -3,12 +3,15 @@ package com.innowise.authservice.service;
 import com.innowise.authservice.dto.request.AuthRequest;
 import com.innowise.authservice.dto.request.RegistrationRequest;
 import com.innowise.authservice.dto.response.AuthResponse;
+import com.innowise.authservice.dto.response.ValidateResponse;
 import com.innowise.authservice.entity.Credentials;
+import com.innowise.authservice.entity.RefreshToken;
 import com.innowise.authservice.entity.Role;
 import com.innowise.authservice.exception.AuthException;
 import com.innowise.authservice.exception.TokenException;
 import com.innowise.authservice.exception.UserNotFoundException;
 import com.innowise.authservice.repository.CredentialsRepository;
+import com.innowise.authservice.repository.RefreshTokenRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -16,7 +19,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -30,6 +35,9 @@ class AuthServiceTest {
 
     @Mock
     private CredentialsRepository credentialsRepository;
+
+    @Mock
+    private RefreshTokenRepository refreshTokenRepository;
 
     @Mock
     private PasswordEncoder passwordEncoder;
@@ -71,7 +79,7 @@ class AuthServiceTest {
     }
 
     @Test
-    @DisplayName("Login returns tokens when credentials are valid")
+    @DisplayName("Login returns tokens and saves refresh token when credentials are valid")
     void loginReturnsTokensWhenCredentialsAreValid() {
         AuthRequest request = new AuthRequest();
         request.setEmail("test@example.com");
@@ -84,6 +92,8 @@ class AuthServiceTest {
                 .role(Role.USER)
                 .build();
 
+        ReflectionTestUtils.setField(authService, "refreshExp", 86400000L);
+
         when(credentialsRepository.findByEmail(request.getEmail())).thenReturn(Optional.of(credentials));
         when(passwordEncoder.matches(request.getPassword(), credentials.getPasswordHash())).thenReturn(true);
         when(jwtService.generateToken(credentials, false)).thenReturn("accessToken");
@@ -93,6 +103,8 @@ class AuthServiceTest {
 
         assertThat(response.getAccessToken()).isEqualTo("accessToken");
         assertThat(response.getRefreshToken()).isEqualTo("refreshToken");
+        verify(refreshTokenRepository).revokeAllByCredentials(credentials);
+        verify(refreshTokenRepository).save(any(RefreshToken.class));
     }
 
     @Test
@@ -130,61 +142,155 @@ class AuthServiceTest {
     }
 
     @Test
-    @DisplayName("Refresh returns new access token when refresh token is valid")
+    @DisplayName("Refresh returns new access token and rotates refresh token when token is valid")
     void refreshReturnsNewAccessTokenWhenRefreshTokenIsValid() {
-        UUID userId = UUID.randomUUID();
         Credentials credentials = Credentials.builder()
-                .userId(userId)
+                .userId(UUID.randomUUID())
                 .email("test@example.com")
                 .role(Role.USER)
                 .build();
 
+        RefreshToken stored = RefreshToken.builder()
+                .token("refreshToken")
+                .credentials(credentials)
+                .expiresAt(Instant.now().plusSeconds(3600))
+                .revoked(false)
+                .build();
+
+        ReflectionTestUtils.setField(authService, "refreshExp", 86400000L);
+
         when(jwtService.validateRefresh("refreshToken")).thenReturn(true);
-        when(jwtService.extractUserId("refreshToken")).thenReturn(userId.toString());
-        when(credentialsRepository.findByUserId(userId)).thenReturn(Optional.of(credentials));
+        when(refreshTokenRepository.findByToken("refreshToken")).thenReturn(Optional.of(stored));
         when(jwtService.generateToken(credentials, false)).thenReturn("newAccessToken");
+        when(jwtService.generateToken(credentials, true)).thenReturn("newRefreshToken");
 
         String result = authService.refresh("refreshToken");
 
         assertThat(result).isEqualTo("newAccessToken");
+        assertThat(stored.isRevoked()).isTrue();
+        verify(refreshTokenRepository, times(2)).save(any(RefreshToken.class));
     }
 
     @Test
-    @DisplayName("Refresh throws TokenException when refresh token is invalid")
+    @DisplayName("Refresh throws TokenException when JWT signature is invalid")
     void refreshThrowsTokenExceptionWhenRefreshTokenIsInvalid() {
         when(jwtService.validateRefresh("invalidToken")).thenReturn(false);
 
         assertThatThrownBy(() -> authService.refresh("invalidToken"))
-                .isInstanceOf(TokenException.class);
+                .isInstanceOf(TokenException.class)
+                .hasMessageContaining("Invalid refresh token");
     }
 
     @Test
-    @DisplayName("Refresh throws UserNotFoundException when user does not exist")
-    void refreshThrowsUserNotFoundExceptionWhenUserDoesNotExist() {
+    @DisplayName("Refresh throws TokenException when refresh token is not found in database")
+    void refreshThrowsTokenExceptionWhenRefreshTokenNotFoundInDatabase() {
+        when(jwtService.validateRefresh("ghostToken")).thenReturn(true);
+        when(refreshTokenRepository.findByToken("ghostToken")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authService.refresh("ghostToken"))
+                .isInstanceOf(TokenException.class)
+                .hasMessageContaining("Refresh token not found");
+    }
+
+    @Test
+    @DisplayName("Refresh throws TokenException when refresh token is revoked")
+    void refreshThrowsTokenExceptionWhenRefreshTokenIsRevoked() {
+        Credentials credentials = Credentials.builder()
+                .userId(UUID.randomUUID())
+                .role(Role.USER)
+                .build();
+
+        RefreshToken revoked = RefreshToken.builder()
+                .token("revokedToken")
+                .credentials(credentials)
+                .expiresAt(Instant.now().plusSeconds(3600))
+                .revoked(true)
+                .build();
+
+        when(jwtService.validateRefresh("revokedToken")).thenReturn(true);
+        when(refreshTokenRepository.findByToken("revokedToken")).thenReturn(Optional.of(revoked));
+
+        assertThatThrownBy(() -> authService.refresh("revokedToken"))
+                .isInstanceOf(TokenException.class)
+                .hasMessageContaining("Refresh token has been revoked");
+    }
+
+    @Test
+    @DisplayName("Refresh throws TokenException when refresh token is expired in database")
+    void refreshThrowsTokenExceptionWhenRefreshTokenIsExpiredInDatabase() {
+        Credentials credentials = Credentials.builder()
+                .userId(UUID.randomUUID())
+                .role(Role.USER)
+                .build();
+
+        RefreshToken expired = RefreshToken.builder()
+                .token("expiredToken")
+                .credentials(credentials)
+                .expiresAt(Instant.now().minusSeconds(3600))
+                .revoked(false)
+                .build();
+
+        when(jwtService.validateRefresh("expiredToken")).thenReturn(true);
+        when(refreshTokenRepository.findByToken("expiredToken")).thenReturn(Optional.of(expired));
+
+        assertThatThrownBy(() -> authService.refresh("expiredToken"))
+                .isInstanceOf(TokenException.class)
+                .hasMessageContaining("Refresh token has expired");
+    }
+
+    @Test
+    @DisplayName("Logout revokes refresh token when token exists")
+    void logoutRevokesRefreshTokenWhenTokenExists() {
+        RefreshToken stored = RefreshToken.builder()
+                .token("refreshToken")
+                .revoked(false)
+                .build();
+
+        when(refreshTokenRepository.findByToken("refreshToken")).thenReturn(Optional.of(stored));
+
+        authService.logout("refreshToken");
+
+        assertThat(stored.isRevoked()).isTrue();
+        verify(refreshTokenRepository).save(stored);
+    }
+
+    @Test
+    @DisplayName("Logout throws TokenException when token does not exist")
+    void logoutThrowsTokenExceptionWhenTokenDoesNotExist() {
+        when(refreshTokenRepository.findByToken("unknownToken")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authService.logout("unknownToken"))
+                .isInstanceOf(TokenException.class)
+                .hasMessageContaining("Refresh token not found");
+    }
+
+    @Test
+    @DisplayName("Validate returns ValidateResponse with valid=true when token is valid")
+    void validateReturnsValidResponseWhenTokenIsValid() {
         UUID userId = UUID.randomUUID();
+        ValidateResponse expected = new ValidateResponse(true, userId.toString(), Role.USER);
 
-        when(jwtService.validateRefresh("refreshToken")).thenReturn(true);
-        when(jwtService.extractUserId("refreshToken")).thenReturn(userId.toString());
-        when(credentialsRepository.findByUserId(userId)).thenReturn(Optional.empty());
+        when(jwtService.validateAndExtract("validToken")).thenReturn(expected);
 
-        assertThatThrownBy(() -> authService.refresh("refreshToken"))
-                .isInstanceOf(UserNotFoundException.class);
+        ValidateResponse result = authService.validate("validToken");
+
+        assertThat(result.isValid()).isTrue();
+        assertThat(result.getUserId()).isEqualTo(userId.toString());
+        assertThat(result.getRole()).isEqualTo(Role.USER);
     }
 
     @Test
-    @DisplayName("Validate returns true when token is valid")
-    void validateReturnsTrueWhenTokenIsValid() {
-        when(jwtService.validate("validToken")).thenReturn(true);
+    @DisplayName("Validate returns ValidateResponse with valid=false when token is invalid")
+    void validateReturnsInvalidResponseWhenTokenIsInvalid() {
+        ValidateResponse expected = new ValidateResponse(false, null, null);
 
-        assertThat(authService.validate("validToken")).isTrue();
-    }
+        when(jwtService.validateAndExtract("invalidToken")).thenReturn(expected);
 
-    @Test
-    @DisplayName("Validate returns false when token is invalid")
-    void validateReturnsFalseWhenTokenIsInvalid() {
-        when(jwtService.validate("invalidToken")).thenReturn(false);
+        ValidateResponse result = authService.validate("invalidToken");
 
-        assertThat(authService.validate("invalidToken")).isFalse();
+        assertThat(result.isValid()).isFalse();
+        assertThat(result.getUserId()).isNull();
+        assertThat(result.getRole()).isNull();
     }
 
     @Test
