@@ -46,7 +46,7 @@ class AuthServiceTest {
     private JwtService jwtService;
 
     @InjectMocks
-    private AuthService authService;
+    private AuthServiceImpl authService;
 
     @Test
     @DisplayName("Register saves credentials when email is not taken")

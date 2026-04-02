@@ -79,9 +79,9 @@ public class AuthController {
     }
 
     /**
-     * Завершает сессию пользователя, отзывая refresh-токен
+     * Terminates the user's session by revoking the refresh token.
      *
-     * @param token refresh-токен
+     * @param token refresh token
      * @return HTTP 204 (No Content)
      */
     @PostMapping("/logout")
