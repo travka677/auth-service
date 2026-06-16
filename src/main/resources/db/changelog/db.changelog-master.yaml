@@ -1,0 +1,4 @@
+databaseChangeLog:
+  - include:
+      file: migrations/001_create_credentials_table.sql
+      relativeToChangelogFile: true
